@@ -1,0 +1,45 @@
+name: test
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup target add riscv64imac-unknown-none-elf
+          rustc --version
+          cargo --version
+
+      - name: Build the toy lock script (RISC-V)
+        env:
+          CRATE_CC_NO_DEFAULTS: "1"
+          CC_riscv64imac_unknown_none_elf: clang
+          AR_riscv64imac_unknown_none_elf: ar
+          CFLAGS_riscv64imac_unknown_none_elf: "--target=riscv64 -march=rv64imac -mabi=lp64 -mcmodel=medany -nostdlib -ffreestanding -fno-builtin -O2"
+        run: |
+          clang --version | head -1
+          cd escrow
+          RUSTFLAGS="-C link-arg=-s" cargo build --release --target riscv64imac-unknown-none-elf
+          ls -l target/riscv64imac-unknown-none-elf/release/escrow
+
+      - name: Run the fixtures in the CKB script verifier
+        run: |
+          cd tests
+          set -o pipefail
+          ESCROW_BIN="$GITHUB_WORKSPACE/escrow/target/riscv64imac-unknown-none-elf/release/escrow" \
+            cargo test --release -- --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/result.txt"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### fixture results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^RESULT|test result|error(\[|:)" result.txt >> "$GITHUB_STEP_SUMMARY" || tail -40 result.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
